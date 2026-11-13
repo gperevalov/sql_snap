@@ -105,12 +105,30 @@ class _RunTemplateScreenState extends State<RunTemplateScreen> {
             title: Text(tpl.name),
             actions: [
               IconButton(
+                tooltip: store.isFavorite(tpl.id) ? 'Убрать из избранного' : 'В избранное',
+                icon: store.isFavorite(tpl.id)
+                    ? const Icon(Icons.star, color: Colors.amber)
+                    : const Icon(Icons.star_border),
+                onPressed: () => store.toggleFavorite(tpl.id),
+              ),
+              IconButton(
                 tooltip: 'Редактировать',
                 icon: const Icon(Icons.edit_outlined),
                 onPressed: () => Navigator.push(
                   context,
                   MaterialPageRoute(builder: (_) => TemplateEditScreen(template: tpl)),
                 ),
+              ),
+              PopupMenuButton<String>(
+                onSelected: (v) {
+                  if (v == 'pin') pinTemplateShortcut(context, tpl);
+                  if (v == 'preset') _savePreset(tpl);
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(value: 'pin', child: Text('Ярлык на рабочий стол')),
+                  if (tpl.vars.isNotEmpty)
+                    const PopupMenuItem(value: 'preset', child: Text('Сохранить значения как набор')),
+                ],
               ),
             ],
           ),
@@ -135,7 +153,9 @@ class _RunTemplateScreenState extends State<RunTemplateScreen> {
                 ],
                 onChanged: (v) => setState(() => _connName = v),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              if (tpl.vars.isNotEmpty) _presets(tpl),
+              const SizedBox(height: 4),
               for (final v in tpl.vars) ...[
                 _field(tpl, v),
                 const SizedBox(height: 14),
@@ -177,6 +197,73 @@ class _RunTemplateScreenState extends State<RunTemplateScreen> {
     );
   }
 
+  /// Named sets of values: tap to fill all fields at once, × to delete, «+» to save current values.
+  Widget _presets(QueryTemplate tpl) {
+    final presets = store.presetsOf(tpl.id);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Wrap(spacing: 6, runSpacing: 0, crossAxisAlignment: WrapCrossAlignment.center, children: [
+        Text('Наборы:', style: Theme.of(context).textTheme.bodySmall),
+        for (final e in presets.entries)
+          InputChip(
+            visualDensity: VisualDensity.compact,
+            avatar: const Icon(Icons.bolt, size: 16),
+            label: Text(e.key),
+            onPressed: () => _applyPreset(tpl, e.key, e.value),
+            onDeleted: () async {
+              if (await confirm(context, 'Удалить набор?', e.key, ok: 'Удалить', danger: true)) {
+                store.deletePreset(tpl.id, e.key);
+              }
+            },
+          ),
+        ActionChip(
+          visualDensity: VisualDensity.compact,
+          avatar: const Icon(Icons.add, size: 16),
+          label: Text(presets.isEmpty ? 'Сохранить текущие значения' : 'Сохранить'),
+          onPressed: () => _savePreset(tpl),
+        ),
+      ]),
+    );
+  }
+
+  void _applyPreset(QueryTemplate tpl, String name, Map<String, String> values) {
+    for (final v in tpl.vars) {
+      final value = values[v.name];
+      if (value != null) _set(v.name, value);
+    }
+    toast(context, 'Подставлен набор «$name»');
+  }
+
+  Future<void> _savePreset(QueryTemplate tpl) async {
+    final suggestion = tpl.vars.map((v) => _values[v.name] ?? '').firstWhere(
+          (x) => x.trim().isNotEmpty && x.length <= 30,
+          orElse: () => '',
+        );
+    final ctl = TextEditingController(text: suggestion);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Сохранить набор значений'),
+        content: TextField(
+          controller: ctl,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Название', hintText: 'например «Ромашка, неделя»'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, ctl.text), child: const Text('Сохранить')),
+        ],
+      ),
+    );
+    ctl.dispose();
+    final n = (name ?? '').trim();
+    if (n.isEmpty || !mounted) return;
+    final existed = store.presetsOf(tpl.id).containsKey(n);
+    store.savePreset(tpl.id, n, {for (final v in tpl.vars) v.name: _values[v.name] ?? ''});
+    toast(context, existed ? 'Набор «$n» обновлён' : 'Набор «$n» сохранён');
+  }
+
   Widget _recent(QueryTemplate tpl, TemplateVar v) {
     final recent = store.recentValues(tpl.id, v.name).where((x) => x != _values[v.name]).take(5).toList();
     if (recent.isEmpty) return const SizedBox.shrink();
@@ -211,6 +298,11 @@ class _RunTemplateScreenState extends State<RunTemplateScreen> {
           icon: const Icon(Icons.clear, size: 18),
           onPressed: () => _set(v.name, ''),
         );
+    // Clear button plus, if the author listed options, a dropdown with them.
+    Widget suffixButtons() => Row(mainAxisSize: MainAxisSize.min, children: [
+          if (v.choices.isNotEmpty) _optionsMenu(v),
+          clearBtn(),
+        ]);
 
     switch (v.type) {
       case 'bool':
@@ -221,7 +313,7 @@ class _RunTemplateScreenState extends State<RunTemplateScreen> {
           onChanged: (b) => _set(v.name, b ? 'true' : 'false'),
         );
       case 'select':
-        final opts = v.options.where((o) => o.isNotEmpty).toSet().toList();
+        final opts = v.choices;
         final cur = _values[v.name] ?? '';
         return DropdownButtonFormField<String>(
           value: opts.contains(cur) ? cur : (cur.isEmpty && !v.required ? '' : null),
@@ -234,25 +326,16 @@ class _RunTemplateScreenState extends State<RunTemplateScreen> {
           onChanged: (x) => _set(v.name, x ?? ''),
         );
       case 'list':
-        if (v.options.isNotEmpty) {
-          final selected = (_values[v.name] ?? '')
-              .split(RegExp(r'[,\n;]+'))
-              .map((e) => e.trim())
-              .where((e) => e.isNotEmpty)
-              .toSet();
-          return InputDecorator(
-            decoration: deco(),
-            child: Wrap(spacing: 6, children: [
-              for (final o in v.options)
-                FilterChip(
-                  label: Text(o),
-                  selected: selected.contains(o),
-                  onSelected: (s) {
-                    s ? selected.add(o) : selected.remove(o);
-                    _set(v.name, v.options.where(selected.contains).join(','));
-                  },
-                ),
-            ]),
+        if (v.choices.isNotEmpty) {
+          final selected = _splitList(_values[v.name]);
+          return InkWell(
+            borderRadius: BorderRadius.circular(4),
+            onTap: () => _pickMany(v),
+            child: InputDecorator(
+              isEmpty: selected.isEmpty,
+              decoration: deco(suffix: const Icon(Icons.arrow_drop_down)),
+              child: Text(selected.join(', ')),
+            ),
           );
         }
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -310,7 +393,7 @@ class _RunTemplateScreenState extends State<RunTemplateScreen> {
           TextField(
             controller: ctl,
             keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
-            decoration: deco(suffix: clearBtn()),
+            decoration: deco(suffix: suffixButtons()),
             onChanged: (x) => _set(v.name, x, updateField: false),
           ),
           _recent(tpl, v),
@@ -319,12 +402,72 @@ class _RunTemplateScreenState extends State<RunTemplateScreen> {
         return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           TextField(
             controller: ctl,
-            decoration: deco(suffix: clearBtn()),
+            decoration: deco(suffix: suffixButtons()),
             onChanged: (x) => _set(v.name, x, updateField: false),
           ),
           _recent(tpl, v),
         ]);
     }
+  }
+
+  /// Dropdown with the author's options for free-input fields: pick one or keep typing your own.
+  Widget _optionsMenu(TemplateVar v) => PopupMenuButton<String>(
+        tooltip: 'Варианты',
+        icon: const Icon(Icons.arrow_drop_down),
+        onSelected: (o) => _set(v.name, o),
+        itemBuilder: (_) => [
+          for (final o in v.choices)
+            CheckedPopupMenuItem(value: o, checked: _values[v.name] == o, child: Text(o)),
+        ],
+      );
+
+  static List<String> _splitList(String? raw) => (raw ?? '')
+      .split(RegExp(r'[,\n;]+'))
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toSet()
+      .toList();
+
+  /// Multi-select dropdown for `list` variables with options.
+  /// Values that are not among the options (e.g. from history) stay in the list so they can be unticked.
+  Future<void> _pickMany(TemplateVar v) async {
+    FocusScope.of(context).unfocus();
+    final current = _splitList(_values[v.name]);
+    final items = [...v.choices, ...current.where((x) => !v.choices.contains(x))];
+    final selected = current.toSet();
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialog) => AlertDialog(
+          title: Text(v.title),
+          contentPadding: const EdgeInsets.only(top: 12),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: ListView(shrinkWrap: true, children: [
+              for (final o in items)
+                CheckboxListTile(
+                  dense: true,
+                  value: selected.contains(o),
+                  title: Text(o),
+                  onChanged: (b) => setDialog(() => b == true ? selected.add(o) : selected.remove(o)),
+                ),
+            ]),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => setDialog(() => selected.length == items.length
+                  ? selected.clear()
+                  : selected.addAll(items)),
+              child: Text(selected.length == items.length ? 'Снять все' : 'Выбрать все'),
+            ),
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, selected), child: const Text('Готово')),
+          ],
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    _set(v.name, items.where(result.contains).join(','));
   }
 
   Future<void> _pickDate(TemplateVar v) async {

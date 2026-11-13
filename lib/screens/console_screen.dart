@@ -15,7 +15,6 @@ class _ConsoleScreenState extends State<ConsoleScreen> {
   final store = AppStore.instance;
   final _sql = TextEditingController();
   String? _connId;
-  final List<String> _history = [];
 
   @override
   void dispose() {
@@ -32,11 +31,7 @@ class _ConsoleScreenState extends State<ConsoleScreen> {
     }
     final sql = _sql.text.trim();
     if (sql.isEmpty) return;
-    setState(() {
-      _history.remove(sql);
-      _history.insert(0, sql);
-      if (_history.length > 30) _history.removeLast();
-    });
+    store.rememberConsoleSql(sql);
     await executeAndShow(context, conn, sql, title: conn.name);
   }
 
@@ -68,10 +63,10 @@ class _ConsoleScreenState extends State<ConsoleScreen> {
               PopupMenuButton<String>(
                 icon: const Icon(Icons.history),
                 tooltip: 'История',
-                enabled: _history.isNotEmpty,
+                enabled: store.consoleHistory.isNotEmpty,
                 onSelected: (s) => _sql.text = s,
                 itemBuilder: (_) => [
-                  for (final h in _history)
+                  for (final h in store.consoleHistory)
                     PopupMenuItem(
                       value: h,
                       child: Text(h, maxLines: 2, overflow: TextOverflow.ellipsis, style: monoStyle),

@@ -145,6 +145,19 @@ class TemplateVar {
 
   String get title => label.isNotEmpty ? label : name;
 
+  /// Types where the template author can list ready-made values (shown as a dropdown).
+  static const optionTypes = {'text', 'number', 'raw', 'select', 'list'};
+
+  /// Types where options are the *only* allowed values, and items may be quoted or not.
+  static const itemTypeTypes = {'select', 'list'};
+
+  bool get supportsOptions => optionTypes.contains(type);
+  bool get supportsItemType => itemTypeTypes.contains(type);
+
+  /// Options to offer in the form: non-empty, without duplicates, in the author's order.
+  List<String> get choices =>
+      supportsOptions ? options.where((o) => o.isNotEmpty).toSet().toList() : const [];
+
   Map<String, dynamic> toJson() => {
         'name': name,
         'label': label,
@@ -247,6 +260,41 @@ class QueryResult {
         'message': message,
         'truncated': truncated,
       };
+
+  factory QueryResult.fromJson(Map<String, dynamic> j) => QueryResult(
+        columns: ((j['columns'] as List?) ?? const []).map((e) => e.toString()).toList(),
+        rows: ((j['rows'] as List?) ?? const [])
+            .map((r) => (r as List).map((v) => v?.toString()).toList())
+            .toList(),
+        affectedRows: int.tryParse('${j['affectedRows']}'),
+        elapsed: Duration(milliseconds: int.tryParse('${j['elapsedMs']}') ?? 0),
+        message: j['message'] as String?,
+        truncated: j['truncated'] == true,
+      );
+
+  /// Same result limited to [columnIdx] (in that order) and the given [rows] — e.g. what is on screen.
+  QueryResult view(List<int> columnIdx, List<List<String?>> rows) => QueryResult(
+        columns: [for (final i in columnIdx) columns[i]],
+        rows: [
+          for (final r in rows) [for (final i in columnIdx) r[i]]
+        ],
+        affectedRows: affectedRows,
+        elapsed: elapsed,
+        message: message,
+        truncated: truncated,
+      );
+
+  /// First [limit] rows only (for storing in history).
+  QueryResult head(int limit) => rows.length <= limit
+      ? this
+      : QueryResult(
+          columns: columns,
+          rows: rows.sublist(0, limit),
+          affectedRows: affectedRows,
+          elapsed: elapsed,
+          message: message,
+          truncated: true,
+        );
 
   String toTsv() {
     String esc(String? v) =>

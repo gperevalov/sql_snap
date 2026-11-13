@@ -1,15 +1,43 @@
 import 'package:flutter/material.dart';
 
+import 'app_lock.dart';
+import 'navigation.dart';
+import 'pin_code.dart';
+import 'run_history.dart';
 import 'screens/connections_screen.dart';
 import 'screens/console_screen.dart';
+import 'screens/run_template_screen.dart';
 import 'screens/sync_screen.dart';
 import 'screens/templates_screen.dart';
 import 'store.dart';
+import 'template_shortcuts.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppStore.instance.load();
+  await RunHistory.instance.load();
+  await PinCode.instance.load();
   runApp(const SqlSnapApp());
+  await TemplateShortcuts.init(_openTemplateFromShortcut);
+}
+
+/// Opens a template from a launcher shortcut. If the app is locked, the screen
+/// opens underneath the lock and becomes visible after unlocking.
+void _openTemplateFromShortcut(String templateId) {
+  void open() {
+    final nav = navigatorKey.currentState;
+    if (nav == null) return;
+    if (AppStore.instance.templateById(templateId) == null) return;
+    nav.popUntil((r) => r.isFirst);
+    nav.push(MaterialPageRoute(builder: (_) => RunTemplateScreen(templateId: templateId)));
+  }
+
+  // On cold start the navigator may not be built yet.
+  if (navigatorKey.currentState == null) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => open());
+  } else {
+    open();
+  }
 }
 
 class SqlSnapApp extends StatelessWidget {
@@ -20,6 +48,7 @@ class SqlSnapApp extends StatelessWidget {
     const seed = Color(0xFF2E6BE6);
     return MaterialApp(
       title: 'SQL Snap',
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: seed, useMaterial3: true),
       darkTheme: ThemeData(
@@ -27,6 +56,7 @@ class SqlSnapApp extends StatelessWidget {
         useMaterial3: true,
         brightness: Brightness.dark,
       ),
+      builder: (context, child) => AppLock(child: child!),
       home: const HomeScreen(),
     );
   }

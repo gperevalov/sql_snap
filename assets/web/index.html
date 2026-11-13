@@ -72,6 +72,7 @@ pre.sql{font-family:var(--mono);font-size:12px;background:var(--bg);padding:8px;
 .chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
 .chip{font-size:11px;border:1px solid var(--line);border-radius:10px;padding:1px 8px;cursor:pointer;background:var(--bg)}
 .chip:hover{border-color:var(--accent)}
+.chip>input[type=checkbox]{width:auto;margin:0 2px 0 0;vertical-align:middle}
 kbd{font-size:11px;border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted)}
 </style>
 </head>
@@ -302,6 +303,11 @@ function renderTemplate(el) {
   renderVars(); renderRunForm();
 }
 
+// Same rules as TemplateVar.optionTypes / itemTypeTypes in lib/models.dart.
+const OPTION_TYPES = ['text', 'number', 'raw', 'select', 'list'];
+const ITEM_TYPE_TYPES = ['select', 'list'];
+const choicesOf = v => OPTION_TYPES.includes(v.type) ? [...new Set((v.options || []).filter(Boolean))] : [];
+
 function renderVars() {
   const t = current; const el = $('#vars'); if (!el) return;
   if (!t.vars.length) { el.innerHTML = '<div class="hint">Добавьте {{имя}} в SQL — переменная появится здесь.</div>'; return; }
@@ -312,8 +318,8 @@ function renderVars() {
       <td><input data-k="label" value="${esc(v.label)}" placeholder="${esc(v.name)}"></td>
       <td><select data-k="type">${Object.entries(types).map(([k, l]) => `<option value="${k}" ${k === v.type ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></td>
       <td><input data-k="default" value="${esc(v.default)}" placeholder="${v.type === 'date' || v.type === 'datetime' ? 'today-7, month_start…' : ''}"></td>
-      <td><input data-k="options" value="${esc((v.options || []).join(', '))}" ${v.type === 'select' || v.type === 'list' ? '' : 'disabled'}></td>
-      <td><select data-k="itemType" ${v.type === 'select' || v.type === 'list' ? '' : 'disabled'}><option value="text" ${v.itemType !== 'number' ? 'selected' : ''}>'строки'</option><option value="number" ${v.itemType === 'number' ? 'selected' : ''}>числа</option></select></td>
+      <td><input data-k="options" value="${esc((v.options || []).join(', '))}" ${OPTION_TYPES.includes(v.type) ? '' : 'disabled'}></td>
+      <td><select data-k="itemType" ${ITEM_TYPE_TYPES.includes(v.type) ? '' : 'disabled'}><option value="text" ${v.itemType !== 'number' ? 'selected' : ''}>'строки'</option><option value="number" ${v.itemType === 'number' ? 'selected' : ''}>числа</option></select></td>
       <td style="text-align:center"><input type="checkbox" data-k="required" ${v.required ? 'checked' : ''}></td>
     </tr>`).join('')}</table>`;
   el.querySelectorAll('[data-k]').forEach(inp => {
@@ -339,19 +345,34 @@ async function renderRunForm() {
   runRecent = prep.recent || {};
   t.vars.forEach(v => { if (!(v.name in runValues) || runValues._tpl !== t.id) runValues[v.name] = prep.defaults[v.name] ?? ''; });
   runValues._tpl = t.id;
-  el.innerHTML = t.vars.map(v => {
+  el.innerHTML = t.vars.map((v, i) => {
     const val = runValues[v.name] ?? '';
     const opt = (prep.optional || []).includes(v.name) && !v.required;
     const lab = `<span data-lab="${esc(v.name)}">${esc(v.label || v.name)}</span>${v.required ? ' *' : ''}${opt ? ' <i>(необяз.)</i>' : ''}`;
+    const choices = choicesOf(v);
+    // Free-input fields with options get a native dropdown of suggestions (datalist), own values still allowed.
+    const dlId = `dl-${i}`;
+    const dl = choices.length ? ` list="${dlId}"` : '';
+    const datalist = choices.length ? `<datalist id="${dlId}">${choices.map(o => `<option value="${esc(o)}">`).join('')}</datalist>` : '';
     let input;
     switch (v.type) {
-      case 'number': input = `<input type="text" inputmode="decimal" data-v="${esc(v.name)}" value="${esc(val)}">`; break;
+      case 'number': input = `<input type="text" inputmode="decimal" data-v="${esc(v.name)}" value="${esc(val)}"${dl}>${datalist}`; break;
       case 'date': input = `<input type="date" data-v="${esc(v.name)}" value="${esc(val)}">`; break;
       case 'datetime': input = `<input type="datetime-local" step="1" data-v="${esc(v.name)}" value="${esc(String(val).replace(' ', 'T'))}">`; break;
       case 'bool': input = `<div><input type="checkbox" data-v="${esc(v.name)}" ${['true', '1', 'да', 'yes'].includes(String(val).toLowerCase()) ? 'checked' : ''}></div>`; break;
-      case 'select': input = `<select data-v="${esc(v.name)}"><option value="">— не задано —</option>${(v.options || []).map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`; break;
-      case 'list': input = `<textarea rows="2" data-v="${esc(v.name)}" placeholder="через запятую или с новой строки">${esc(val)}</textarea>`; break;
-      default: input = `<input data-v="${esc(v.name)}" value="${esc(val)}">`;
+      case 'select': input = `<select data-v="${esc(v.name)}"><option value="">— не задано —</option>${choices.map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`; break;
+      case 'list':
+        if (choices.length) {
+          // Multi-select: ticked options are joined with commas into the hidden value input.
+          const sel = new Set(String(val).split(/[,;\n]+/).map(s => s.trim()).filter(Boolean));
+          const items = [...choices, ...[...sel].filter(x => !choices.includes(x))];
+          input = `<input type="hidden" data-v="${esc(v.name)}" value="${esc(val)}"><div class="chips" data-multi="${esc(v.name)}">${items.map(o =>
+            `<label class="chip"><input type="checkbox" value="${esc(o)}" ${sel.has(o) ? 'checked' : ''}> ${esc(o)}</label>`).join('')}</div>`;
+        } else {
+          input = `<textarea rows="2" data-v="${esc(v.name)}" placeholder="через запятую или с новой строки">${esc(val)}</textarea>`;
+        }
+        break;
+      default: input = `<input data-v="${esc(v.name)}" value="${esc(val)}"${dl}>${datalist}`;
     }
     const rec = (runRecent[v.name] || []).slice(0, 4);
     return `<label class="f">${lab}${input}${rec.length ? `<div class="chips">${rec.map(r => `<span class="chip" data-chip="${esc(v.name)}" data-val="${esc(r)}">${esc(r.length > 24 ? r.slice(0, 24) + '…' : r)}</span>`).join('')}</div>` : ''}</label>`;
@@ -361,6 +382,11 @@ async function renderRunForm() {
     inp.addEventListener('input', upd); inp.addEventListener('change', upd);
     inp.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { upd(); runTemplate(); } });
   });
+  el.querySelectorAll('[data-multi]').forEach(box => box.addEventListener('change', () => {
+    const hidden = el.querySelector(`[data-v="${CSS.escape(box.dataset.multi)}"]`);
+    hidden.value = [...box.querySelectorAll('input:checked')].map(c => c.value).join(',');
+    hidden.dispatchEvent(new Event('input'));
+  }));
   el.querySelectorAll('[data-chip]').forEach(ch => ch.onclick = () => {
     const inp = el.querySelector(`[data-v="${CSS.escape(ch.dataset.chip)}"]`);
     if (inp) { inp.value = ch.dataset.val; inp.dispatchEvent(new Event('input')); }

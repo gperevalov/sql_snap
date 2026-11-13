@@ -201,8 +201,14 @@ class _TemplateEditScreenState extends State<TemplateEditScreen> {
     );
   }
 
+  /// Explains how the options will look on the run form for the given variable type.
+  String _optionsHelp(String type) => switch (type) {
+        'select' => 'На форме — выпадающий список, другое значение ввести нельзя',
+        'list' => 'На форме — выпадающий список с галочками, можно выбрать несколько',
+        _ => 'На форме — выпадающий список, но можно вписать и своё значение',
+      };
+
   Widget _varEditor(TemplateVar v) {
-    final hasOptions = v.type == 'select' || v.type == 'list';
     return Card(
       margin: const EdgeInsets.only(top: 8),
       child: ExpansionTile(
@@ -236,17 +242,21 @@ class _TemplateEditScreenState extends State<TemplateEditScreen> {
             ),
             onChanged: (x) => setState(() => v.defaultValue = x),
           ),
-          if (hasOptions) ...[
+          if (v.supportsOptions) ...[
             const SizedBox(height: 8),
             TextField(
               controller: _vc(v, 'options', v.options.join(', ')),
               decoration: InputDecoration(
                 labelText: v.type == 'select' ? 'Варианты (через запятую)' : 'Варианты для выбора (необязательно)',
+                helperText: _optionsHelp(v.type),
+                helperMaxLines: 2,
                 isDense: true,
               ),
               onChanged: (x) => setState(() => v.options =
                   x.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList()),
             ),
+          ],
+          if (v.supportsItemType) ...[
             const SizedBox(height: 8),
             SegmentedButton<String>(
               segments: const [

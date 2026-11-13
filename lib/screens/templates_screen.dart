@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../models.dart';
 import '../store.dart';
 import 'common.dart';
+import 'history_screen.dart';
 import 'run_template_screen.dart';
+import 'settings_screen.dart';
 import 'template_edit_screen.dart';
 
 class TemplatesScreen extends StatefulWidget {
@@ -38,6 +40,7 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
               t.description.toLowerCase().contains(q) ||
               t.sql.toLowerCase().contains(q);
         }).toList();
+        final favorites = store.favoriteTemplates.where(list.contains).toList();
         final groups = <String, List<QueryTemplate>>{};
         for (final t in list) {
           groups.putIfAbsent(t.folder, () => []).add(t);
@@ -45,6 +48,18 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
         return Scaffold(
           appBar: AppBar(
             title: const Text('Шаблоны'),
+            actions: [
+              IconButton(
+                tooltip: 'История запусков',
+                icon: const Icon(Icons.history),
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryScreen())),
+              ),
+              IconButton(
+                tooltip: 'Настройки',
+                icon: const Icon(Icons.settings_outlined),
+                onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen())),
+              ),
+            ],
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(56),
               child: Padding(
@@ -67,8 +82,12 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
               : ListView(
                   padding: const EdgeInsets.only(bottom: 88),
                   children: [
+                    if (favorites.isNotEmpty) ...[
+                      _sectionTitle(Icons.star, 'Избранное', favorites.length),
+                      for (final t in favorites) _tile(t),
+                    ],
                     for (final e in groups.entries) ...[
-                      if (groups.length > 1 || e.key.isNotEmpty)
+                      if (groups.length > 1 || e.key.isNotEmpty || favorites.isNotEmpty)
                         InkWell(
                           onTap: () => setState(() {
                             _collapsed.contains(e.key) ? _collapsed.remove(e.key) : _collapsed.add(e.key);
@@ -102,8 +121,23 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
     );
   }
 
+  Widget _sectionTitle(IconData icon, String title, int count) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+        child: Row(children: [
+          Icon(icon, size: 18, color: Colors.amber),
+          const SizedBox(width: 4),
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(color: Theme.of(context).colorScheme.primary),
+          ),
+          const SizedBox(width: 6),
+          Text('$count', style: Theme.of(context).textTheme.bodySmall),
+        ]),
+      );
+
   Widget _tile(QueryTemplate t) {
     final conn = store.connectionByName(t.connection);
+    final fav = store.isFavorite(t.id);
     return ListTile(
       leading: conn != null
           ? dbBadge(conn.type)
@@ -122,9 +156,18 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
         context,
         MaterialPageRoute(builder: (_) => RunTemplateScreen(templateId: t.id)),
       ),
-      trailing: PopupMenuButton<String>(
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        IconButton(
+          tooltip: fav ? 'Убрать из избранного' : 'В избранное',
+          icon: Icon(fav ? Icons.star : Icons.star_border, color: fav ? Colors.amber : null),
+          onPressed: () => store.toggleFavorite(t.id),
+        ),
+        PopupMenuButton<String>(
         onSelected: (v) async {
           switch (v) {
+            case 'pin':
+              await pinTemplateShortcut(context, t);
+              break;
             case 'edit':
               _edit(t);
               break;
@@ -143,11 +186,13 @@ class _TemplatesScreenState extends State<TemplatesScreen> {
           }
         },
         itemBuilder: (_) => const [
+          PopupMenuItem(value: 'pin', child: Text('Ярлык на рабочий стол')),
           PopupMenuItem(value: 'edit', child: Text('Редактировать')),
           PopupMenuItem(value: 'dup', child: Text('Дублировать')),
           PopupMenuItem(value: 'del', child: Text('Удалить')),
         ],
       ),
+      ]),
     );
   }
 }

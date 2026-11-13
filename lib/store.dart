@@ -24,6 +24,33 @@ class GithubSettings {
       );
 }
 
+/// App-wide preferences (not synced anywhere).
+class AppSettings {
+  /// Lock the app on start / after being in background. Unlocked by the app passcode
+  /// (see PinCode) and/or the phone's fingerprint / face / screen lock.
+  bool lockEnabled;
+
+  /// Allow unlocking with fingerprint / face / phone screen lock.
+  bool useBiometrics;
+
+  /// Lock again after the app has been in background this long. 0 = every time.
+  int lockAfterMinutes;
+
+  AppSettings({this.lockEnabled = false, this.useBiometrics = true, this.lockAfterMinutes = 1});
+
+  Map<String, dynamic> toJson() => {
+        'lockEnabled': lockEnabled,
+        'useBiometrics': useBiometrics,
+        'lockAfterMinutes': lockAfterMinutes,
+      };
+
+  factory AppSettings.fromJson(Map<String, dynamic>? j) => AppSettings(
+        lockEnabled: j?['lockEnabled'] == true,
+        useBiometrics: j?['useBiometrics'] != false,
+        lockAfterMinutes: int.tryParse('${j?['lockAfterMinutes']}') ?? 1,
+      );
+}
+
 class AppStore extends ChangeNotifier {
   AppStore._();
   static final AppStore instance = AppStore._();
@@ -39,6 +66,20 @@ class AppStore extends ChangeNotifier {
 
   /// templateId -> varName -> last values (most recent first)
   Map<String, Map<String, List<String>>> history = {};
+
+  // Personal data is keyed by template id (not stored inside templates),
+  // so GitHub pull / import that replace template objects keep it.
+
+  /// Ids of favorite templates, in the order they were starred.
+  List<String> favorites = [];
+
+  /// templateId -> preset name -> varName -> value
+  Map<String, Map<String, Map<String, String>>> presets = {};
+
+  /// SQL console history (most recent first).
+  List<String> consoleHistory = [];
+
+  AppSettings settings = AppSettings();
 
   File? _file;
   Timer? _saveTimer;
@@ -66,6 +107,11 @@ class AppStore extends ChangeNotifier {
                     (vv as List).map((e) => e.toString()).toList(),
                   )),
             ));
+        favorites = ((j['favorites'] as List?) ?? const []).map((e) => e.toString()).toList();
+        presets = _decodePresets(j['presets']);
+        consoleHistory = ((j['consoleHistory'] as List?) ?? const []).map((e) => e.toString()).toList();
+        settings = AppSettings.fromJson(
+            j['settings'] == null ? null : Map<String, dynamic>.from(j['settings'] as Map));
       } catch (e) {
         debugPrint('Failed to load data: $e');
       }
@@ -80,7 +126,25 @@ class AppStore extends ChangeNotifier {
         'github': github.toJson(),
         'lanPort': lanPort,
         'history': history,
+        'favorites': favorites,
+        'presets': presets,
+        'consoleHistory': consoleHistory,
+        'settings': settings.toJson(),
       };
+
+  static Map<String, Map<String, Map<String, String>>> _decodePresets(Object? raw) {
+    final out = <String, Map<String, Map<String, String>>>{};
+    if (raw is! Map) return out;
+    raw.forEach((tplId, byName) {
+      if (byName is! Map) return;
+      out[tplId.toString()] = {
+        for (final e in byName.entries)
+          if (e.value is Map)
+            e.key.toString(): (e.value as Map).map((k, v) => MapEntry(k.toString(), v.toString())),
+      };
+    });
+    return out;
+  }
 
   void save() {
     _saveTimer?.cancel();
@@ -184,6 +248,8 @@ class AppStore extends ChangeNotifier {
   void deleteTemplate(String id) {
     templates.removeWhere((t) => t.id == id);
     history.remove(id);
+    favorites.remove(id);
+    presets.remove(id);
     changed();
   }
 
@@ -208,6 +274,50 @@ class AppStore extends ChangeNotifier {
       if (list.length > 8) list.removeRange(8, list.length);
     });
     save();
+  }
+
+  // ---------- favorites ----------
+
+  bool isFavorite(String templateId) => favorites.contains(templateId);
+
+  void toggleFavorite(String templateId) {
+    if (!favorites.remove(templateId)) favorites.add(templateId);
+    changed();
+  }
+
+  /// Favorite templates that still exist, in starred order.
+  List<QueryTemplate> get favoriteTemplates =>
+      favorites.map(templateById).whereType<QueryTemplate>().toList();
+
+  // ---------- value presets ----------
+
+  Map<String, Map<String, String>> presetsOf(String templateId) => presets[templateId] ?? const {};
+
+  void savePreset(String templateId, String name, Map<String, String> values) {
+    presets.putIfAbsent(templateId, () => {})[name] = Map.of(values);
+    changed();
+  }
+
+  void deletePreset(String templateId, String name) {
+    presets[templateId]?.remove(name);
+    if (presets[templateId]?.isEmpty ?? false) presets.remove(templateId);
+    changed();
+  }
+
+  // ---------- console history ----------
+
+  void rememberConsoleSql(String sql) {
+    consoleHistory.remove(sql);
+    consoleHistory.insert(0, sql);
+    if (consoleHistory.length > 30) consoleHistory.removeRange(30, consoleHistory.length);
+    changed();
+  }
+
+  // ---------- settings ----------
+
+  void updateSettings(void Function(AppSettings s) change) {
+    change(settings);
+    changed();
   }
 
   // ---------- github token ----------

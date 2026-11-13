@@ -19,6 +19,36 @@ class DbException implements Exception {
   String toString() => message;
 }
 
+class QueryCancelledException extends DbException {
+  QueryCancelledException() : super('Запрос отменён');
+}
+
+/// Lets the UI abort a running query: drivers register how to drop their connection.
+class CancelToken {
+  bool _cancelled = false;
+  final _onCancel = <Future<void> Function()>[];
+
+  bool get isCancelled => _cancelled;
+
+  /// Registers [action]; runs it right away if already cancelled.
+  void onCancel(Future<void> Function() action) {
+    if (_cancelled) {
+      action().catchError((_) {});
+    } else {
+      _onCancel.add(action);
+    }
+  }
+
+  void cancel() {
+    if (_cancelled) return;
+    _cancelled = true;
+    for (final a in _onCancel) {
+      a().catchError((_) {});
+    }
+    _onCancel.clear();
+  }
+}
+
 String? _fmt(Object? v) {
   if (v == null) return null;
   if (v is String) return v;
@@ -45,8 +75,10 @@ String? _fmt(Object? v) {
   return v.toString();
 }
 
-/// Executes [sql] against [c]. Throws [DbException] on any error.
-Future<QueryResult> runQuery(DbConnection c, String password, String sql) async {
+/// Executes [sql] against [c]. Throws [DbException] on any error,
+/// [QueryCancelledException] if [cancel] was triggered.
+Future<QueryResult> runQuery(DbConnection c, String password, String sql, {CancelToken? cancel}) async {
+  final token = cancel ?? CancelToken();
   if (c.readOnly && isWriteQuery(sql)) {
     throw DbException('Подключение «${c.name}» только для чтения');
   }
@@ -54,15 +86,18 @@ Future<QueryResult> runQuery(DbConnection c, String password, String sql) async 
   try {
     switch (c.type) {
       case DbType.postgres:
-        return await _runPostgres(c, password, sql, sw);
+        return await _runPostgres(c, password, sql, sw, token);
       case DbType.mysql:
-        return await _runMysql(c, password, sql, sw);
+        return await _runMysql(c, password, sql, sw, token);
       case DbType.clickhouse:
-        return await _runClickhouse(c, password, sql, sw);
+        return await _runClickhouse(c, password, sql, sw, token);
     }
   } on DbException {
+    if (token.isCancelled) throw QueryCancelledException();
     rethrow;
   } catch (e) {
+    // Closing the connection makes drivers fail with their own errors — report it as a cancel.
+    if (token.isCancelled) throw QueryCancelledException();
     throw DbException(_cleanError(e));
   }
 }
@@ -76,7 +111,7 @@ String _cleanError(Object e) {
 }
 
 Future<QueryResult> _runPostgres(
-    DbConnection c, String password, String sql, Stopwatch sw) async {
+    DbConnection c, String password, String sql, Stopwatch sw, CancelToken cancel) async {
   final conn = await pg.Connection.open(
     pg.Endpoint(
       host: c.host,
@@ -89,6 +124,7 @@ Future<QueryResult> _runPostgres(
       sslMode: c.ssl ? pg.SslMode.require : pg.SslMode.disable,
     ),
   ).timeout(connectTimeout);
+  cancel.onCancel(() => conn.close(force: true));
   try {
     final res = await conn
         .execute(sql, queryMode: pg.QueryMode.simple)
@@ -114,7 +150,7 @@ Future<QueryResult> _runPostgres(
 }
 
 Future<QueryResult> _runMysql(
-    DbConnection c, String password, String sql, Stopwatch sw) async {
+    DbConnection c, String password, String sql, Stopwatch sw, CancelToken cancel) async {
   final conn = await MySQLConnection.createConnection(
     host: c.host,
     port: c.port,
@@ -124,6 +160,7 @@ Future<QueryResult> _runMysql(
     secure: c.ssl,
   );
   await conn.connect(timeoutMs: connectTimeout.inMilliseconds);
+  cancel.onCancel(() => conn.close());
   try {
     final res = await conn.execute(sql).timeout(queryTimeout);
     final cols = res.cols.map((col) => col.name).toList();
@@ -147,7 +184,7 @@ Future<QueryResult> _runMysql(
 }
 
 Future<QueryResult> _runClickhouse(
-    DbConnection c, String password, String sql, Stopwatch sw) async {
+    DbConnection c, String password, String sql, Stopwatch sw, CancelToken cancel) async {
   var body = sql.trim();
   while (body.endsWith(';')) {
     body = body.substring(0, body.length - 1).trimRight();
@@ -165,7 +202,12 @@ Future<QueryResult> _runClickhouse(
       if (c.readOnly) 'readonly': '2',
     },
   );
-  final resp = await http
+  // Own client so that cancel can drop the HTTP connection (ClickHouse then stops the query).
+  final client = http.Client();
+  cancel.onCancel(() async => client.close());
+  final http.Response resp;
+  try {
+    resp = await client
       .post(
         uri,
         headers: {
@@ -176,6 +218,9 @@ Future<QueryResult> _runClickhouse(
         body: utf8.encode(body),
       )
       .timeout(queryTimeout);
+  } finally {
+    client.close();
+  }
   final text = utf8.decode(resp.bodyBytes, allowMalformed: true);
   if (resp.statusCode != 200) {
     throw DbException(text.trim().isEmpty ? 'HTTP ${resp.statusCode}' : text.trim());
