@@ -1,0 +1,12 @@
+# Flutter
+.dart_tool/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+*.iml
+.idea/
+# Signing key: keep it OUT of git (it goes to GitHub Secrets)
+signing/
+*.keystore
+*.jks

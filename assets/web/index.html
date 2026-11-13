@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SQL Snap — редактор</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<style>
+:root{--bg:#f6f7fb;--panel:#fff;--line:#e3e6ee;--text:#1d2433;--muted:#6b7385;--accent:#2e6be6;--accent-soft:#e8efff;--danger:#d64545;--ok:#1f9d55;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#14161c;--panel:#1c1f27;--line:#2c313d;--text:#e6e9f0;--muted:#8f97a8;--accent:#6b9bff;--accent-soft:#1f2a44}}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;gap:16px;padding:10px 16px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0}
+header nav{display:flex;gap:4px}
+header nav button{border:0;background:none;color:var(--muted);padding:6px 12px;border-radius:6px;cursor:pointer;font:inherit}
+header nav button.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+header .sp{flex:1}
+#status{font-size:12px;color:var(--muted)}
+main{flex:1;display:flex;min-height:0}
+aside{width:300px;border-right:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+aside .top{padding:10px;display:flex;gap:6px;border-bottom:1px solid var(--line)}
+aside .list{overflow:auto;flex:1}
+.folder{padding:10px 12px 4px;font-size:12px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.03em}
+.item{padding:7px 12px 7px 16px;cursor:pointer;border-left:3px solid transparent}
+.item:hover{background:var(--bg)}
+.item.sel{background:var(--accent-soft);border-left-color:var(--accent)}
+.item .sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:1px 5px;border-radius:3px;margin-right:6px;vertical-align:1px}
+.b-mysql{background:#00758f22;color:#00758f}.b-postgres{background:#33679122;color:#4a7fb5}.b-clickhouse{background:#e0a10022;color:#c58d00}
+section.content{flex:1;overflow:auto;padding:16px 20px 60px}
+.empty{color:var(--muted);text-align:center;margin-top:80px}
+input,select,textarea{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%}
+input[type=checkbox]{width:auto}
+textarea{font-family:var(--mono);font-size:13px}
+label.f{display:block;font-size:12px;color:var(--muted);margin-bottom:10px}
+label.f>input,label.f>select,label.f>textarea{margin-top:3px}
+.row{display:flex;gap:12px}.row>*{flex:1}
+button.b{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--text);padding:6px 12px;border-radius:6px;cursor:pointer;white-space:nowrap}
+button.b:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.danger{color:var(--danger)}
+button.b:disabled{opacity:.5;cursor:default}
+.toolbar{display:flex;gap:8px;align-items:center;margin:8px 0 14px;flex-wrap:wrap}
+h2{font-size:18px;margin:0 0 12px}
+h3{font-size:14px;margin:18px 0 8px}
+.CodeMirror{border:1px solid var(--line);border-radius:6px;height:auto;min-height:180px;font-family:var(--mono);font-size:13px;background:var(--panel);color:var(--text)}
+.CodeMirror-scroll{min-height:180px;max-height:480px}
+.CodeMirror-gutters{background:var(--bg);border-right:1px solid var(--line)}
+.CodeMirror-cursor{border-left-color:var(--text)}
+@media (prefers-color-scheme:dark){.cm-keyword{color:#c792ea!important}.cm-string{color:#c3e88d!important}.cm-number{color:#f78c6c!important}.cm-comment{color:#697098!important}.CodeMirror-selected{background:#2c3550!important}}
+.cm-tplvar{background:#ffd54f44;border-radius:2px}
+.hint{font-size:12px;color:var(--muted)}
+table.vars{width:100%;border-collapse:collapse;font-size:13px}
+table.vars th{text-align:left;font-weight:500;color:var(--muted);font-size:12px;padding:4px}
+table.vars td{padding:3px 4px;vertical-align:middle}
+table.vars td code{font-family:var(--mono);background:var(--bg);padding:2px 5px;border-radius:4px}
+.runbox{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;margin-top:18px}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 14px}
+pre.sql{font-family:var(--mono);font-size:12px;background:var(--bg);padding:8px;border-radius:6px;white-space:pre-wrap;margin:8px 0;max-height:200px;overflow:auto}
+.res{margin-top:12px;overflow:auto;max-height:60vh;border:1px solid var(--line);border-radius:6px}
+.res table{border-collapse:collapse;font-family:var(--mono);font-size:12px;width:max-content;min-width:100%}
+.res th{position:sticky;top:0;background:var(--bg);text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);font-family:system-ui}
+.res td{padding:4px 8px;border-bottom:1px solid var(--line);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res td.null{color:var(--muted);font-style:italic}
+.res tr:hover td{background:var(--accent-soft)}
+.err{color:var(--danger);white-space:pre-wrap;font-family:var(--mono);font-size:12px;margin-top:10px}
+.ok{color:var(--ok)}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:8px 16px;border-radius:6px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:80vw}
+#toast.show{opacity:.95}
+#toast.error{background:var(--danger)}
+.chips{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px}
+.chip{font-size:11px;border:1px solid var(--line);border-radius:10px;padding:1px 8px;cursor:pointer;background:var(--bg)}
+.chip:hover{border-color:var(--accent)}
+kbd{font-size:11px;border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>SQL Snap</h1>
+  <nav>
+    <button data-tab="templates" class="active">Шаблоны</button>
+    <button data-tab="connections">Подключения</button>
+    <button data-tab="console">SQL</button>
+    <button data-tab="io">Импорт/экспорт</button>
+  </nav>
+  <div class="sp"></div>
+  <span id="status">подключение к телефону…</span>
+</header>
+<main>
+  <aside id="aside">
+    <div class="top">
+      <input id="search" placeholder="Поиск">
+      <button class="b primary" id="addBtn" title="Создать">+</button>
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+  <section class="content" id="content"></section>
+</main>
+<div id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
+<script>
+'use strict';
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const state = { connections: [], templates: [], folders: [], varTypes: {}, tab: 'templates', sel: null, dirty: false };
+let editor = null; // CodeMirror or textarea wrapper
+let current = null; // template or connection being edited (copy)
+
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+function toast(msg, error) {
+  const t = $('#toast');
+  t.textContent = msg; t.className = 'show' + (error ? ' error' : '');
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = '', error ? 5000 : 2200);
+}
+
+async function api(method, path, body) {
+  const r = await fetch('/api/' + path, {
+    method, headers: { 'X-Token': TOKEN, 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let j;
+  try { j = await r.json(); } catch { throw new Error('HTTP ' + r.status); }
+  if (!r.ok) throw new Error(j && j.error || ('HTTP ' + r.status));
+  return j;
+}
+
+async function load() {
+  try {
+    const s = await api('GET', 'state');
+    Object.assign(state, s);
+    $('#status').innerHTML = '<span class="ok">●</span> телефон на связи';
+  } catch (e) {
+    $('#status').innerHTML = '<span style="color:var(--danger)">●</span> ' + esc(e.message);
+    throw e;
+  }
+}
+
+function connByName(n) { return state.connections.find(c => c.name === n) || state.connections.find(c => c.name.toLowerCase() === String(n).toLowerCase()); }
+function badge(type) { const t = { mysql: 'MY', postgres: 'PG', clickhouse: 'CH' }[type] || '?'; return `<span class="badge b-${type}">${t}</span>`; }
+
+// ---------------- navigation ----------------
+document.querySelectorAll('header nav button').forEach(b => b.onclick = () => switchTab(b.dataset.tab));
+function switchTab(tab) {
+  if (state.dirty && !confirm('Есть несохранённые изменения. Уйти?')) return;
+  state.dirty = false;
+  state.tab = tab; state.sel = null; current = null;
+  document.querySelectorAll('header nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  $('#aside').style.display = (tab === 'templates' || tab === 'connections') ? '' : 'none';
+  renderList(); renderContent();
+}
+$('#search').oninput = renderList;
+$('#addBtn').onclick = () => {
+  if (state.dirty && !confirm('Есть несохранённые изменения. Продолжить?')) return;
+  state.dirty = false;
+  if (state.tab === 'templates') {
+    current = { id: uid(), name: '', folder: '', connection: state.connections[0]?.name || '', description: '', sql: 'SELECT *\nFROM table_name\nWHERE id = {{id}}\nLIMIT 100', vars: [], _new: true };
+    syncVarsLocal();
+  } else {
+    current = { id: uid(), name: '', type: 'postgres', host: '', port: 5432, database: '', user: '', ssl: false, readOnly: false, hasPassword: false, _new: true };
+  }
+  state.sel = current.id; renderList(); renderContent();
+};
+
+function renderList() {
+  const q = $('#search').value.toLowerCase();
+  const el = $('#list');
+  if (state.tab === 'templates') {
+    const items = state.templates.filter(t => !q || [t.name, t.folder, t.description, t.sql].some(x => (x || '').toLowerCase().includes(q)));
+    const groups = {};
+    items.forEach(t => (groups[t.folder || ''] ||= []).push(t));
+    el.innerHTML = Object.keys(groups).sort().map(f => `
+      ${(f || Object.keys(groups).length > 1) ? `<div class="folder">${esc(f || 'Без папки')}</div>` : ''}
+      ${groups[f].map(t => { const c = connByName(t.connection); return `
+        <div class="item ${state.sel === t.id ? 'sel' : ''}" data-id="${t.id}">
+          <div>${c ? badge(c.type) : '<span class="badge">?</span>'}${esc(t.name)}</div>
+          <div class="sub">${esc(t.description || (t.vars || []).map(v => v.label || v.name).join(', '))}</div>
+        </div>`; }).join('')}`).join('') || '<div class="empty">Нет шаблонов</div>';
+  } else {
+    el.innerHTML = state.connections.filter(c => !q || c.name.toLowerCase().includes(q)).map(c => `
+      <div class="item ${state.sel === c.id ? 'sel' : ''}" data-id="${c.id}">
+        <div>${badge(c.type)}${esc(c.name)}</div>
+        <div class="sub">${esc(c.user)}@${esc(c.host)}:${c.port}${c.database ? '/' + esc(c.database) : ''}</div>
+      </div>`).join('') || '<div class="empty">Нет подключений</div>';
+  }
+  el.querySelectorAll('.item').forEach(it => it.onclick = () => select(it.dataset.id));
+}
+
+function select(id) {
+  if (state.dirty && !confirm('Есть несохранённые изменения. Уйти?')) return;
+  state.dirty = false;
+  state.sel = id;
+  const src = state.tab === 'templates' ? state.templates.find(t => t.id === id) : state.connections.find(c => c.id === id);
+  current = src ? JSON.parse(JSON.stringify(src)) : null;
+  renderList(); renderContent();
+}
+
+function renderContent() {
+  const el = $('#content');
+  editor = null;
+  if (state.tab === 'console') return renderConsole(el);
+  if (state.tab === 'io') return renderIO(el);
+  if (!current) {
+    el.innerHTML = `<div class="empty">${state.tab === 'templates'
+      ? 'Выберите шаблон слева или создайте новый (+).<br><br><span class="hint">{{имя}} — переменная, [[ AND x = {{x}} ]] — необязательный блок</span>'
+      : 'Выберите подключение или добавьте новое (+)'}</div>`;
+    return;
+  }
+  if (state.tab === 'templates') renderTemplate(el); else renderConnection(el);
+}
+
+// ---------------- SQL editor ----------------
+function makeEditor(textarea, onChange, onRun) {
+  if (window.CodeMirror) {
+    const cm = CodeMirror.fromTextArea(textarea, {
+      mode: 'text/x-sql', lineNumbers: true, lineWrapping: true, indentUnit: 2, viewportMargin: Infinity,
+      extraKeys: { 'Ctrl-Enter': () => onRun && onRun(), 'Cmd-Enter': () => onRun && onRun(), 'Ctrl-S': () => saveCurrent(), 'Cmd-S': () => saveCurrent() },
+    });
+    cm.addOverlay({ token(stream) { if (stream.match(/\{\{\s*[A-Za-z_]\w*\s*\}\}/)) return 'tplvar'; if (stream.match(/\[\[|\]\]/)) return 'tplvar'; while (stream.next() != null && !stream.match(/\{\{|\[\[|\]\]/, false)) {} return null; } });
+    cm.on('change', () => onChange && onChange(cm.getValue()));
+    return { get: () => cm.getValue(), set: v => cm.setValue(v), focus: () => cm.focus(), insert: s => { cm.replaceSelection(s); cm.focus(); } };
+  }
+  textarea.rows = 12;
+  textarea.addEventListener('input', () => onChange && onChange(textarea.value));
+  textarea.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); onRun && onRun(); } });
+  return { get: () => textarea.value, set: v => textarea.value = v, focus: () => textarea.focus(), insert: s => { const a = textarea.selectionStart, b = textarea.selectionEnd; textarea.setRangeText(s, a, b, 'end'); textarea.dispatchEvent(new Event('input')); textarea.focus(); } };
+}
+
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveCurrent(); } });
+
+// ---------------- template editor ----------------
+const VAR_RE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+function detectVars(sql) { const out = []; for (const m of sql.matchAll(VAR_RE)) if (!out.includes(m[1])) out.push(m[1]); return out; }
+function syncVarsLocal() {
+  const names = detectVars(current.sql);
+  const by = Object.fromEntries((current.vars || []).map(v => [v.name, v]));
+  const need = names.filter(n => !by[n]);
+  current.vars = names.map(n => by[n] || { name: n, label: '', type: 'text', default: '', options: [], required: false, itemType: 'text' });
+  if (need.length) {
+    // ask phone for smart type guesses for new vars
+    api('POST', 'sync-vars', { sql: current.sql, vars: current.vars.filter(v => !need.includes(v.name)) }).then(r => {
+      r.vars.forEach(v => { const i = current.vars.findIndex(x => x.name === v.name); if (i >= 0 && need.includes(v.name)) current.vars[i] = v; });
+      renderVars(); renderRunForm();
+    }).catch(() => {});
+  }
+}
+
+function renderTemplate(el) {
+  const t = current;
+  el.innerHTML = `
+    <h2>${t._new ? 'Новый шаблон' : esc(t.name)}</h2>
+    <div class="row">
+      <label class="f">Название *<input id="t-name" value="${esc(t.name)}"></label>
+      <label class="f">Папка<input id="t-folder" list="folders" value="${esc(t.folder)}"><datalist id="folders">${state.folders.map(f => `<option value="${esc(f)}">`).join('')}</datalist></label>
+      <label class="f">Подключение<select id="t-conn">${state.connections.map(c => `<option ${c.name === t.connection ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}${connByName(t.connection) || !t.connection ? '' : `<option selected>${esc(t.connection)}</option>`}</select></label>
+    </div>
+    <label class="f">Описание<input id="t-desc" value="${esc(t.description)}"></label>
+    <label class="f" style="margin-bottom:4px">SQL</label>
+    <textarea id="t-sql">${esc(t.sql)}</textarea>
+    <div class="toolbar">
+      <button class="b" id="t-addvar">+ {{переменная}}</button>
+      <button class="b" id="t-addopt">+ [[ необязательный блок ]]</button>
+      <span class="hint"><kbd>Ctrl</kbd>+<kbd>S</kbd> сохранить, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> выполнить</span>
+      <span class="sp" style="flex:1"></span>
+      ${t._new ? '' : '<button class="b" id="t-dup">Дублировать</button><button class="b danger" id="t-del">Удалить</button>'}
+      <button class="b primary" id="t-save">Сохранить</button>
+    </div>
+    <h3>Переменные</h3>
+    <div id="vars"></div>
+    <div class="runbox">
+      <div style="display:flex;align-items:center;gap:10px"><b>Запуск</b><span class="hint">значения как на телефоне; запрос выполняет телефон</span><span style="flex:1"></span><button class="b primary" id="t-run">▶ Выполнить</button></div>
+      <div id="runform" class="vgrid" style="margin-top:10px"></div>
+      <div id="runout"></div>
+    </div>`;
+  const mark = () => { state.dirty = true; };
+  $('#t-name').oninput = e => { t.name = e.target.value; mark(); };
+  $('#t-folder').oninput = e => { t.folder = e.target.value; mark(); };
+  $('#t-desc').oninput = e => { t.description = e.target.value; mark(); };
+  $('#t-conn').onchange = e => { t.connection = e.target.value; mark(); };
+  let deb;
+  editor = makeEditor($('#t-sql'), v => {
+    t.sql = v; mark();
+    clearTimeout(deb); deb = setTimeout(() => { const before = t.vars.map(x => x.name).join(); syncVarsLocal(); if (before !== t.vars.map(x => x.name).join()) { renderVars(); renderRunForm(); } }, 300);
+  }, runTemplate);
+  $('#t-addvar').onclick = () => { const n = prompt('Имя переменной (латиница, цифры, _)', ''); if (n) editor.insert('{{' + n.trim().replace(/[^A-Za-z0-9_]/g, '_') + '}}'); };
+  $('#t-addopt').onclick = () => editor.insert('[[ AND  ]]');
+  $('#t-save').onclick = saveCurrent;
+  $('#t-run').onclick = runTemplate;
+  if ($('#t-del')) $('#t-del').onclick = async () => {
+    if (!confirm('Удалить шаблон «' + t.name + '»?')) return;
+    await api('DELETE', 'templates/' + t.id); state.dirty = false; current = null; await load(); renderList(); renderContent(); toast('Удалено');
+  };
+  if ($('#t-dup')) $('#t-dup').onclick = () => {
+    if (state.dirty && !confirm('Несохранённые изменения попадут только в копию. Продолжить?')) return;
+    current = { ...JSON.parse(JSON.stringify(t)), id: uid(), name: t.name + ' (копия)', sourcePath: undefined, _new: true };
+    state.sel = current.id; state.dirty = true; renderList(); renderContent();
+  };
+  renderVars(); renderRunForm();
+}
+
+function renderVars() {
+  const t = current; const el = $('#vars'); if (!el) return;
+  if (!t.vars.length) { el.innerHTML = '<div class="hint">Добавьте {{имя}} в SQL — переменная появится здесь.</div>'; return; }
+  const types = state.varTypes;
+  el.innerHTML = `<table class="vars"><tr><th>Переменная</th><th>Подпись</th><th>Тип</th><th>По умолчанию</th><th>Варианты (через запятую)</th><th>Элементы</th><th title="Обязательная">Обяз.</th></tr>
+    ${t.vars.map((v, i) => `<tr data-i="${i}">
+      <td><code>${esc(v.name)}</code></td>
+      <td><input data-k="label" value="${esc(v.label)}" placeholder="${esc(v.name)}"></td>
+      <td><select data-k="type">${Object.entries(types).map(([k, l]) => `<option value="${k}" ${k === v.type ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></td>
+      <td><input data-k="default" value="${esc(v.default)}" placeholder="${v.type === 'date' || v.type === 'datetime' ? 'today-7, month_start…' : ''}"></td>
+      <td><input data-k="options" value="${esc((v.options || []).join(', '))}" ${v.type === 'select' || v.type === 'list' ? '' : 'disabled'}></td>
+      <td><select data-k="itemType" ${v.type === 'select' || v.type === 'list' ? '' : 'disabled'}><option value="text" ${v.itemType !== 'number' ? 'selected' : ''}>'строки'</option><option value="number" ${v.itemType === 'number' ? 'selected' : ''}>числа</option></select></td>
+      <td style="text-align:center"><input type="checkbox" data-k="required" ${v.required ? 'checked' : ''}></td>
+    </tr>`).join('')}</table>`;
+  el.querySelectorAll('[data-k]').forEach(inp => {
+    const ev = inp.tagName === 'SELECT' || inp.type === 'checkbox' ? 'change' : 'input';
+    inp.addEventListener(ev, () => {
+      const v = t.vars[+inp.closest('tr').dataset.i]; const k = inp.dataset.k;
+      if (k === 'required') v.required = inp.checked;
+      else if (k === 'options') v.options = inp.value.split(',').map(s => s.trim()).filter(Boolean);
+      else v[k] = inp.value;
+      state.dirty = true;
+      if (k === 'type') renderVars();
+      if (k !== 'label') renderRunForm(); else renderRunFormLabels();
+    });
+  });
+}
+
+let runValues = {};
+let runRecent = {};
+async function renderRunForm() {
+  const t = current; const el = $('#runform'); if (!el) return;
+  let prep = { defaults: {}, recent: {}, optional: [] };
+  try { prep = await api('POST', 'prepare', { template: t }); } catch {}
+  runRecent = prep.recent || {};
+  t.vars.forEach(v => { if (!(v.name in runValues) || runValues._tpl !== t.id) runValues[v.name] = prep.defaults[v.name] ?? ''; });
+  runValues._tpl = t.id;
+  el.innerHTML = t.vars.map(v => {
+    const val = runValues[v.name] ?? '';
+    const opt = (prep.optional || []).includes(v.name) && !v.required;
+    const lab = `<span data-lab="${esc(v.name)}">${esc(v.label || v.name)}</span>${v.required ? ' *' : ''}${opt ? ' <i>(необяз.)</i>' : ''}`;
+    let input;
+    switch (v.type) {
+      case 'number': input = `<input type="text" inputmode="decimal" data-v="${esc(v.name)}" value="${esc(val)}">`; break;
+      case 'date': input = `<input type="date" data-v="${esc(v.name)}" value="${esc(val)}">`; break;
+      case 'datetime': input = `<input type="datetime-local" step="1" data-v="${esc(v.name)}" value="${esc(String(val).replace(' ', 'T'))}">`; break;
+      case 'bool': input = `<div><input type="checkbox" data-v="${esc(v.name)}" ${['true', '1', 'да', 'yes'].includes(String(val).toLowerCase()) ? 'checked' : ''}></div>`; break;
+      case 'select': input = `<select data-v="${esc(v.name)}"><option value="">— не задано —</option>${(v.options || []).map(o => `<option ${o === val ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`; break;
+      case 'list': input = `<textarea rows="2" data-v="${esc(v.name)}" placeholder="через запятую или с новой строки">${esc(val)}</textarea>`; break;
+      default: input = `<input data-v="${esc(v.name)}" value="${esc(val)}">`;
+    }
+    const rec = (runRecent[v.name] || []).slice(0, 4);
+    return `<label class="f">${lab}${input}${rec.length ? `<div class="chips">${rec.map(r => `<span class="chip" data-chip="${esc(v.name)}" data-val="${esc(r)}">${esc(r.length > 24 ? r.slice(0, 24) + '…' : r)}</span>`).join('')}</div>` : ''}</label>`;
+  }).join('') || '<div class="hint">Переменных нет</div>';
+  el.querySelectorAll('[data-v]').forEach(inp => {
+    const upd = () => { runValues[inp.dataset.v] = inp.type === 'checkbox' ? String(inp.checked) : inp.type === 'datetime-local' ? inp.value.replace('T', ' ') : inp.value; };
+    inp.addEventListener('input', upd); inp.addEventListener('change', upd);
+    inp.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { upd(); runTemplate(); } });
+  });
+  el.querySelectorAll('[data-chip]').forEach(ch => ch.onclick = () => {
+    const inp = el.querySelector(`[data-v="${CSS.escape(ch.dataset.chip)}"]`);
+    if (inp) { inp.value = ch.dataset.val; inp.dispatchEvent(new Event('input')); }
+  });
+}
+function renderRunFormLabels() { current.vars.forEach(v => { const s = document.querySelector(`[data-lab="${CSS.escape(v.name)}"]`); if (s) s.textContent = v.label || v.name; }); }
+
+async function runTemplate() {
+  const t = current; const out = $('#runout');
+  out.innerHTML = '<div class="hint" style="margin-top:10px">Выполняю…</div>';
+  try {
+    const values = Object.fromEntries(t.vars.map(v => [v.name, runValues[v.name] ?? '']));
+    const r = await api('POST', 'render', { template: t, values, remember: !t._new });
+    if (!r.connectionId) throw new Error('Подключение «' + t.connection + '» не найдено');
+    if (r.isWrite && !confirm('Запрос изменит данные. Выполнить?\n\n' + r.sql)) { out.innerHTML = ''; return; }
+    await runAndShow(r.connectionId, r.sql, out);
+  } catch (e) { out.innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+}
+
+async function runAndShow(connectionId, sql, out) {
+  out.innerHTML = `<pre class="sql">${esc(sql)}</pre><div class="hint">Выполняю…</div>`;
+  const res = await api('POST', 'run', { connectionId, sql });
+  if (res.error) { out.innerHTML = `<pre class="sql">${esc(sql)}</pre><div class="err">${esc(res.error)}</div>`; return; }
+  lastResult = res;
+  const head = `<div class="toolbar" style="margin:8px 0 0"><span class="hint">${res.columns.length ? `${res.rows.length}${res.truncated ? '+' : ''} строк` : (res.message || 'Готово') + (res.affectedRows != null ? `, затронуто строк: ${res.affectedRows}` : '')} • ${res.elapsedMs} мс</span>
+    ${res.columns.length ? '<button class="b" id="cp-tsv">Копировать (TSV)</button><button class="b" id="cp-csv">Скачать CSV</button>' : ''}</div>`;
+  const table = res.columns.length ? `<div class="res"><table><tr>${res.columns.map(c => `<th>${esc(c)}</th>`).join('')}</tr>${res.rows.map(r => `<tr>${r.map(v => v === null ? '<td class="null">NULL</td>' : `<td title="${esc(v)}">${esc(v)}</td>`).join('')}</tr>`).join('')}</table></div>` : '';
+  out.innerHTML = `<details><summary class="hint">SQL</summary><pre class="sql">${esc(sql)}</pre></details>` + head + table;
+  if ($('#cp-tsv', out)) {
+    $('#cp-tsv', out).onclick = () => { navigator.clipboard.writeText(toDelim(res, '\t')).then(() => toast('Скопировано — вставляется в Excel/Sheets')); };
+    $('#cp-csv', out).onclick = () => download('result.csv', toDelim(res, ','), 'text/csv');
+  }
+}
+let lastResult = null;
+function toDelim(res, d) {
+  const q = v => { if (v === null) return ''; v = String(v); if (d === '\t') return v.replace(/[\t\n]/g, ' '); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+  return [res.columns.map(q).join(d), ...res.rows.map(r => r.map(q).join(d))].join('\n');
+}
+function download(name, text, type) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['﻿' + text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+async function saveCurrent() {
+  if (!current) return;
+  try {
+    if (state.tab === 'templates') {
+      if (!current.name.trim()) return toast('Укажите название', true);
+      const body = { ...current }; delete body._new;
+      const saved = await api('POST', 'templates', body);
+      current = saved;
+    } else if (state.tab === 'connections') {
+      readConnForm();
+      if (!current.name.trim() || !current.host.trim()) return toast('Нужны название и хост', true);
+      const dup = state.connections.find(c => c.name === current.name && c.id !== current.id);
+      if (dup) return toast('Подключение с таким названием уже есть', true);
+      const body = { ...current }; delete body._new; delete body.hasPassword;
+      const saved = await api('POST', 'connections', { connection: body, password: $('#c-pwd').value });
+      current = saved;
+    } else return;
+    state.dirty = false; state.sel = current.id;
+    await load(); renderList(); renderContent(); toast('Сохранено на телефоне');
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------------- connections ----------------
+const DEF_PORT = { mysql: 3306, postgres: 5432, clickhouse: 8123 };
+function renderConnection(el) {
+  const c = current;
+  el.innerHTML = `
+    <h2>${c._new ? 'Новое подключение' : esc(c.name)}</h2>
+    <div class="row">
+      <label class="f">Тип<select id="c-type">${['postgres', 'mysql', 'clickhouse'].map(t => `<option value="${t}" ${t === c.type ? 'selected' : ''}>${{ postgres: 'PostgreSQL', mysql: 'MySQL', clickhouse: 'ClickHouse (HTTP)' }[t]}</option>`).join('')}</select></label>
+      <label class="f">Название *<input id="c-name" value="${esc(c.name)}"></label>
+    </div>
+    <div class="row">
+      <label class="f" style="flex:3">Хост *<input id="c-host" value="${esc(c.host)}"></label>
+      <label class="f">Порт<input id="c-port" value="${esc(c.port)}"></label>
+    </div>
+    <div class="row">
+      <label class="f">База данных<input id="c-db" value="${esc(c.database)}"></label>
+      <label class="f">Пользователь<input id="c-user" value="${esc(c.user)}"></label>
+      <label class="f">Пароль<input id="c-pwd" type="password" autocomplete="new-password" placeholder="${c.hasPassword ? 'сохранён — оставьте пустым' : ''}"></label>
+    </div>
+    <label class="f"><input type="checkbox" id="c-ssl" ${c.ssl ? 'checked' : ''}> SSL/TLS (для ClickHouse — HTTPS, порт 8443; для MySQL 8 обычно нужно)</label>
+    <label class="f"><input type="checkbox" id="c-ro" ${c.readOnly ? 'checked' : ''}> Только чтение</label>
+    <div class="toolbar">
+      <button class="b" id="c-test">Проверить</button>
+      <span id="c-testres" class="hint"></span>
+      <span style="flex:1"></span>
+      ${c._new ? '' : '<button class="b danger" id="c-del">Удалить</button>'}
+      <button class="b primary" id="c-save">Сохранить</button>
+    </div>
+    <p class="hint">Пароль хранится в зашифрованном хранилище телефона и не возвращается в браузер. Проверка использует сохранённые на телефоне данные — сначала сохраните.</p>`;
+  el.querySelectorAll('input,select').forEach(i => i.addEventListener('input', () => state.dirty = true));
+  $('#c-type').onchange = e => { const old = DEF_PORT[c.type]; c.type = e.target.value; if (+$('#c-port').value === old || !$('#c-port').value) $('#c-port').value = DEF_PORT[c.type]; };
+  $('#c-save').onclick = saveCurrent;
+  $('#c-test').onclick = async () => {
+    $('#c-testres').textContent = 'проверяю…';
+    try { const r = await api('POST', 'test', { connectionId: c.id }); $('#c-testres').innerHTML = `<span class="ok">✓ работает, ${r.elapsedMs} мс</span>`; }
+    catch (e) { $('#c-testres').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+  };
+  if ($('#c-del')) $('#c-del').onclick = async () => {
+    if (!confirm('Удалить подключение «' + c.name + '»?')) return;
+    await api('DELETE', 'connections/' + c.id); state.dirty = false; current = null; await load(); renderList(); renderContent();
+  };
+}
+function readConnForm() {
+  const c = current;
+  c.type = $('#c-type').value; c.name = $('#c-name').value.trim(); c.host = $('#c-host').value.trim();
+  c.port = parseInt($('#c-port').value, 10) || DEF_PORT[c.type]; c.database = $('#c-db').value.trim(); c.user = $('#c-user').value.trim();
+  c.ssl = $('#c-ssl').checked; c.readOnly = $('#c-ro').checked;
+}
+
+// ---------------- console ----------------
+let consoleSql = 'SELECT 1';
+let consoleConn = null;
+function renderConsole(el) {
+  el.innerHTML = `
+    <h2>SQL-консоль</h2>
+    <div class="toolbar"><select id="q-conn" style="max-width:320px">${state.connections.map(c => `<option value="${c.id}" ${c.id === consoleConn ? 'selected' : ''}>${esc(c.name)} (${c.type})</option>`).join('')}</select>
+    <button class="b primary" id="q-run">▶ Выполнить</button><button class="b" id="q-save">Сохранить как шаблон</button><span class="hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd></span></div>
+    <textarea id="q-sql">${esc(consoleSql)}</textarea>
+    <div id="q-out"></div>`;
+  consoleConn = $('#q-conn').value;
+  $('#q-conn').onchange = e => consoleConn = e.target.value;
+  const run = async () => {
+    const sql = editor.get();
+    if (!/^\s*(select|with|show|describe|desc|explain|values|table|exists|use|set|\()/i.test(sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n]*/g, '')) && !confirm('Запрос может изменить данные. Выполнить?')) return;
+    try { await runAndShow(consoleConn, sql, $('#q-out')); } catch (e) { $('#q-out').innerHTML = `<div class="err">${esc(e.message)}</div>`; }
+  };
+  editor = makeEditor($('#q-sql'), v => consoleSql = v, run);
+  $('#q-run').onclick = run;
+  $('#q-save').onclick = () => {
+    const conn = state.connections.find(c => c.id === consoleConn);
+    switchTab('templates');
+    current = { id: uid(), name: '', folder: '', connection: conn ? conn.name : '', description: '', sql: consoleSql, vars: [], _new: true };
+    syncVarsLocal(); state.sel = current.id; state.dirty = true; renderList(); renderContent();
+  };
+}
+
+// ---------------- import / export ----------------
+function renderIO(el) {
+  el.innerHTML = `
+    <h2>Импорт / экспорт</h2>
+    <p>Весь набор шаблонов и подключений (без паролей) одним JSON-файлом.</p>
+    <div class="toolbar"><button class="b primary" id="x-exp">Скачать JSON</button>
+    <label class="b" style="cursor:pointer">Импортировать файл…<input type="file" id="x-imp" accept=".json,application/json" style="display:none"></label></div>
+    <p class="hint">Импорт объединяет данные: шаблоны сопоставляются по id или по папке+названию, подключения — по названию.</p>
+    <h3>Как ещё можно синхронизировать</h3>
+    <p class="hint">В приложении во вкладке «Синхр.» можно подключить GitHub-репозиторий: шаблоны хранятся как .sql файлы с шапкой-комментарием, их удобно править в IDE и забирать на телефон кнопкой Pull.</p>`;
+  $('#x-exp').onclick = async () => { const b = await api('GET', 'export'); download('sqlsnap-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(b, null, 2), 'application/json'); };
+  $('#x-imp').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { const j = JSON.parse(await f.text()); const r = await api('POST', 'import', j); toast(r.message); await load(); }
+    catch (err) { toast(err.message, true); }
+  };
+}
+
+window.addEventListener('beforeunload', e => { if (state.dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+load().then(() => { renderList(); renderContent(); }).catch(() => {
+  $('#content').innerHTML = '<div class="empty">Не удалось связаться с телефоном. Проверьте, что приложение открыто, редактор включён, и ссылка актуальна.</div>';
+});
+setInterval(() => api('GET', 'state').then(s => { $('#status').innerHTML = '<span class="ok">●</span> телефон на связи'; if (!state.dirty) { const sel = state.sel; Object.assign(state, s); renderList(); } else { state.connections = s.connections; } }).catch(() => { $('#status').innerHTML = '<span style="color:var(--danger)">●</span> нет связи с телефоном'; }), 15000);
+</script>
+</body>
+</html>
